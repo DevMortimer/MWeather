@@ -179,6 +179,11 @@ class _HomePageState extends State<HomePage> {
                       helperText: "e.g. Manila, Philippines",
                       labelText: "Location",
                       onSubmit: (val) async {
+                        String location = locationController.text.trim();
+                        setState(() {
+                          _location = location;
+                          reloading = true;
+                        });
                         await _updateLocation(context, val);
                         locationController.clear();
                       },
@@ -190,6 +195,11 @@ class _HomePageState extends State<HomePage> {
                   FloatingActionButton(
                     child: const Icon(Icons.check),
                     onPressed: () async {
+                      String location = locationController.text.trim();
+                      setState(() {
+                        _location = location;
+                        reloading = true;
+                      });
                       await _updateLocation(context, locationController.text);
                       locationController.clear();
                     },
