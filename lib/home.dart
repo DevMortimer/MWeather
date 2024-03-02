@@ -10,16 +10,27 @@ import 'package:weather/weather.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 Future<String?> getMessageOfTheDay(Weather w) async {
-  final model = GenerativeModel(model: 'gemini-pro', apiKey: apiKey);
-  final prompt =
-      'With these data, give a brief tips and message to start the day:'
+  final model = GenerativeModel(
+    model: 'gemini-pro',
+    apiKey: apiKey,
+    generationConfig: GenerationConfig(temperature: 0.7),
+    safetySettings: [
+      SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.none),
+      SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
+      SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.none),
+      SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.none),
+    ],
+  );
+  final prompt = 'You\'re a very informative and thoughtful forecaster.'
+      'You are talking to an audience of various backgrounds.'
+      'With these data, give brief tips, reminders, and message about the day:'
       '\" date: ${w.date} country_and_area: ${w.country} ${w.areaName} overall: ${w.weatherDescription} '
       'cloudiness: ${w.cloudiness} temperature: ${w.temperature} windspeed: ${w.windSpeed}'
       'wind_weather_condition_code: ${w.weatherConditionCode}\". Ignore blank or nonsensical data.'
       'Make your response ONLY be a 1-2 paragraph message. '
       'Theme of your message is the internet meme "gigachad" and "sigma male". '
       'Be slightly funny, but not too tryhard.'
-      'Don\'t mention the word "gigachad", "chad", and "sigma male" in any form.';
+      'Never mention the word "gigachad", "alpha", "chad", and "sigma male" in any shape or form.';
   final content = [Content.text(prompt)];
   final response = await model.generateContent(content);
   return response.text;
@@ -46,14 +57,42 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadLocation() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
-      _location = (prefs.getString('location') ?? '');
+      weather = null;
     });
+
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final location = (prefs.getString('location') ?? '');
+      if (location != null || location != '') {
+        setState(() {
+          _location = 'temp';
+        });
+
+        await prefs.setString('location', location);
+        final weatherData = await wf.currentWeatherByCityName(location);
+        if (weatherData == null) {
+          throw Exception('Failed to fetch weather data');
+        }
+        final String? MoD = await getMessageOfTheDay(weatherData);
+
+        setState(() {
+          weather = weatherData;
+          _location = location;
+          message = MoD;
+        });
+      }
+    } catch (e) {
+      //
+    }
   }
 
   Future<void> _updateLocation(BuildContext context, String newLocation) async {
-    context.loaderOverlay.show();
+    setState(() {
+      _location = 'temp';
+      weather = null;
+    });
+
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('location', newLocation);
@@ -69,13 +108,10 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       print("Error fetching weather data: $e");
-    } finally {
-      context.loaderOverlay.hide();
     }
   }
 
   Future<void> _resetData(BuildContext context) async {
-    context.loaderOverlay.show();
     SharedPreferences prefs = await SharedPreferences.getInstance();
     prefs.setString('location', '');
     setState(() {
@@ -83,7 +119,6 @@ class _HomePageState extends State<HomePage> {
       weather = null;
       message = null;
     });
-    context.loaderOverlay.hide();
   }
 
   @override
@@ -210,6 +245,7 @@ class _HomePageState extends State<HomePage> {
                           const Icon(Icons.wind_power),
                           "Wind Speed",
                           '${weather?.windSpeed} m/s' ?? "Unknown"),
+                      SizedBox(height: 2.h),
 
                       // Message
                       message != null ? Text(message!) : Container(),
