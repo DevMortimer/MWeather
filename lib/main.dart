@@ -1,15 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:dynamic_color/dynamic_color.dart';
-import 'package:mweather/home.dart';
-import 'package:mweather/routes.dart';
+import 'package:MWeather/routes.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 
 void main() {
   runApp(const MWeather());
 }
 
-class MWeather extends StatelessWidget {
+class MWeather extends StatefulWidget {
   const MWeather({super.key});
+
+  @override
+  State<MWeather> createState() => _MWeatherState();
+}
+
+class _MWeatherState extends State<MWeather> {
   @override
   Widget build(BuildContext context) {
     return DynamicColorBuilder(

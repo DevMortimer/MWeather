@@ -1,19 +1,22 @@
+import 'package:MWeather/api.dart';
+import 'package:MWeather/filled_form_field.dart';
+import 'package:MWeather/main.dart';
+import 'package:MWeather/prompt.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:loader_overlay/loader_overlay.dart';
-import 'package:mweather/api.dart';
-import 'package:mweather/filled_form_field.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'package:weather/weather.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 
 Future<String?> getMessageOfTheDay(Weather w) async {
   final model = GenerativeModel(
     model: 'gemini-pro',
     apiKey: apiKey,
-    generationConfig: GenerationConfig(temperature: 0.7),
+    generationConfig: GenerationConfig(temperature: 0.4),
     safetySettings: [
       SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.none),
       SafetySetting(HarmCategory.harassment, HarmBlockThreshold.none),
@@ -21,17 +24,7 @@ Future<String?> getMessageOfTheDay(Weather w) async {
       SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.none),
     ],
   );
-  final prompt = 'You\'re a very informative and thoughtful forecaster.'
-      'You are talking to an audience of various backgrounds.'
-      'With these data, give brief tips, reminders, and message about the day:'
-      '\" date: ${w.date} country_and_area: ${w.country} ${w.areaName} overall: ${w.weatherDescription} '
-      'cloudiness: ${w.cloudiness} temperature: ${w.temperature} windspeed: ${w.windSpeed}'
-      'wind_weather_condition_code: ${w.weatherConditionCode}\". Ignore blank or nonsensical data.'
-      'Make your response ONLY be a 1-2 paragraph message. '
-      'Theme of your message is the internet meme "gigachad" and "sigma male". '
-      'Be slightly funny, but not too tryhard.'
-      'Never mention the word "gigachad", "alpha", "chad", and "sigma male" in any shape or form.';
-  final content = [Content.text(prompt)];
+  final content = [Content.text(getPrompt(w))];
   final response = await model.generateContent(content);
   return response.text;
 }
@@ -49,50 +42,28 @@ class _HomePageState extends State<HomePage> {
   TextEditingController locationController = TextEditingController(text: "");
   Weather? weather;
   String? message;
+  bool reloading = false;
+  late final Future<void> _updateWeatherFuture;
 
   @override
   void initState() {
     super.initState();
-    _loadLocation();
-  }
+    SharedPreferences.getInstance().then((prefs) {
+      final location = prefs.getString('location');
 
-  Future<void> _loadLocation() async {
-    setState(() {
-      weather = null;
-    });
-
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final location = (prefs.getString('location') ?? '');
-      if (location != null || location != '') {
+      // if there is local data, then load it
+      if (location != null && location.isNotEmpty) {
         setState(() {
-          _location = 'temp';
-        });
-
-        await prefs.setString('location', location);
-        final weatherData = await wf.currentWeatherByCityName(location);
-        if (weatherData == null) {
-          throw Exception('Failed to fetch weather data');
-        }
-        final String? MoD = await getMessageOfTheDay(weatherData);
-
-        setState(() {
-          weather = weatherData;
           _location = location;
-          message = MoD;
+          message = null;
+          weather = null;
         });
+        _updateWeatherFuture = _updateLocation(context, _location!);
       }
-    } catch (e) {
-      //
-    }
+    });
   }
 
   Future<void> _updateLocation(BuildContext context, String newLocation) async {
-    setState(() {
-      _location = 'temp';
-      weather = null;
-    });
-
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('location', newLocation);
@@ -102,23 +73,46 @@ class _HomePageState extends State<HomePage> {
       }
       final String? MoD = await getMessageOfTheDay(weatherData);
       setState(() {
+        reloading = false;
         weather = weatherData;
         _location = newLocation;
         message = MoD;
       });
     } catch (e) {
-      print("Error fetching weather data: $e");
+      if (context.canPop()) {
+        context.pop();
+      }
+      await showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              icon: const Icon(Icons.error),
+              title: const Text("Error"),
+              content: const Text("Error fetching weather data."),
+              actions: [
+                TextButton(
+                  child: const Text("Return"),
+                  onPressed: () {
+                    context.pop();
+                  },
+                ),
+              ],
+            );
+          });
+      await _resetData(context);
     }
   }
 
   Future<void> _resetData(BuildContext context) async {
+    context.loaderOverlay.show();
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    prefs.setString('location', '');
+    prefs.remove('location');
     setState(() {
       _location = null;
       weather = null;
       message = null;
     });
+    context.loaderOverlay.hide();
   }
 
   @override
@@ -134,10 +128,18 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.restart_alt),
             onPressed: () async {
               SharedPreferences prefs = await SharedPreferences.getInstance();
-              await _updateLocation(
-                context,
-                (prefs.getString('location') ?? ''),
-              );
+              if (_location != null && _location != '') {
+                setState(() {
+                  message = null;
+                  weather = null;
+                  reloading = true;
+                });
+
+                await _updateLocation(
+                  context,
+                  _location!,
+                );
+              }
             },
           ),
 
@@ -195,64 +197,83 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
             )
-          : Skeletonizer(
-              enabled: weather == null,
-              child: Center(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(16.sp, 16.sp, 16.sp, 0),
-                  child: Column(
-                    children: [
-                      // Image
-                      Image.asset('assets/images/data.png', height: 32.h),
+          : FutureBuilder(
+              future: weather == null &&
+                      message == null &&
+                      (_location != null && _location!.isNotEmpty)
+                  ? _updateWeatherFuture
+                  : null,
+              builder: ((context, snapshot) {
+                return Skeletonizer(
+                  enabled: reloading ||
+                      (snapshot.connectionState == ConnectionState.waiting ||
+                          snapshot.connectionState == ConnectionState.active),
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(16.sp, 16.sp, 16.sp, 0),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            // Image
+                            Skeleton.keep(
+                              child: Image.asset('assets/images/data.png',
+                                  height: 32.h),
+                            ),
 
-                      // Title
-                      Text(
-                        "Weather Data",
-                        style: theme.textTheme.displaySmall,
+                            // Title
+                            Skeleton.keep(
+                              child: Text(
+                                "Weather Data",
+                                style: theme.textTheme.displaySmall,
+                              ),
+                            ),
+                            SizedBox(height: 1.h),
+
+                            // Date snapshot
+                            Text(
+                              "Date snapshot: ${weather?.date?.toString() ?? "Unknown"}.",
+                            ),
+                            SizedBox(height: 1.h),
+
+                            // Message
+                            message != null ? Text(message!) : Container(),
+                            SizedBox(height: 1.h),
+
+                            // Area
+                            weatherCard(context, const Icon(Icons.map), "Area",
+                                weather?.areaName ?? "Unknown"),
+
+                            // Overall weather
+                            weatherCard(
+                                context,
+                                const Icon(Icons.note_alt),
+                                "Overall",
+                                weather?.weatherDescription?.toUpperCase() ??
+                                    "Unknown"),
+
+                            // Temperature
+                            weatherCard(
+                              context,
+                              const Icon(Icons.thermostat),
+                              "Temperature",
+                              '${weather?.temperature.toString()}; ${weather?.tempMin.toString()} to ${weather?.tempMax.toString()}' ??
+                                  "Unknown",
+                            ),
+
+                            // Wind speed
+                            weatherCard(
+                                context,
+                                const Icon(Icons.wind_power),
+                                "Wind Speed",
+                                '${weather?.windSpeed} m/s' ?? "Unknown"),
+                            SizedBox(height: 8.h),
+                          ],
+                        ),
                       ),
-                      SizedBox(height: 1.h),
-
-                      // Date snapshot
-                      Text(
-                        "Date snapshot: ${weather?.date?.toString() ?? "Unknown"}.",
-                      ),
-                      SizedBox(height: 1.h),
-
-                      // Area
-                      weatherCard(context, const Icon(Icons.map), "Area",
-                          weather?.areaName ?? "Unknown"),
-
-                      // Overall weather
-                      weatherCard(
-                          context,
-                          const Icon(Icons.note_alt),
-                          "Overall",
-                          weather?.weatherDescription?.toUpperCase() ??
-                              "Unknown"),
-
-                      // Temperature
-                      weatherCard(
-                        context,
-                        const Icon(Icons.thermostat),
-                        "Temperature",
-                        '${weather?.temperature.toString()}; ${weather?.tempMin.toString()} to ${weather?.tempMax.toString()}' ??
-                            "Unknown",
-                      ),
-
-                      // Wind speed
-                      weatherCard(
-                          context,
-                          const Icon(Icons.wind_power),
-                          "Wind Speed",
-                          '${weather?.windSpeed} m/s' ?? "Unknown"),
-                      SizedBox(height: 2.h),
-
-                      // Message
-                      message != null ? Text(message!) : Container(),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              }),
             ),
     );
   }

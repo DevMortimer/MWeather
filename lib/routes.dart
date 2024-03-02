@@ -1,6 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'package:loader_overlay/loader_overlay.dart';
-import 'package:mweather/home.dart';
+import 'package:MWeather/home.dart';
 
 final routes = GoRouter(
   routes: [
