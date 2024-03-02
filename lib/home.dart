@@ -1,11 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:loader_overlay/loader_overlay.dart';
+import 'package:mweather/api.dart';
 import 'package:mweather/filled_form_field.dart';
 import 'package:responsive_sizer/responsive_sizer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:skeletonizer/skeletonizer.dart';
 import 'package:weather/weather.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+
+Future<String?> getMessageOfTheDay(Weather w) async {
+  final model = GenerativeModel(model: 'gemini-pro', apiKey: apiKey);
+  final prompt =
+      'With these data, give a brief tips and message to start the day:'
+      '\" date: ${w.date} country_and_area: ${w.country} ${w.areaName} overall: ${w.weatherDescription} '
+      'cloudiness: ${w.cloudiness} temperature: ${w.temperature} windspeed: ${w.windSpeed}'
+      'wind_weather_condition_code: ${w.weatherConditionCode}\". Ignore blank or nonsensical data.'
+      'Make your response ONLY be a 1-2 paragraph message. '
+      'Theme of your message is the internet meme "gigachad" and "sigma male". '
+      'Be slightly funny, but not too tryhard.'
+      'Don\'t mention the word "gigachad", "chad", and "sigma male" in any form.';
+  final content = [Content.text(prompt)];
+  final response = await model.generateContent(content);
+  return response.text;
+}
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,6 +37,7 @@ class _HomePageState extends State<HomePage> {
   String? _location;
   TextEditingController locationController = TextEditingController(text: "");
   Weather? weather;
+  String? message;
 
   @override
   void initState() {
@@ -42,9 +61,11 @@ class _HomePageState extends State<HomePage> {
       if (weatherData == null) {
         throw Exception('Failed to fetch weather data');
       }
+      final String? MoD = await getMessageOfTheDay(weatherData);
       setState(() {
         weather = weatherData;
         _location = newLocation;
+        message = MoD;
       });
     } catch (e) {
       print("Error fetching weather data: $e");
@@ -60,6 +81,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _location = null;
       weather = null;
+      message = null;
     });
     context.loaderOverlay.hide();
   }
@@ -141,18 +163,85 @@ class _HomePageState extends State<HomePage> {
           : Skeletonizer(
               enabled: weather == null,
               child: Center(
-                child: Column(
-                  children: [
-                    Text("Date is ${weather!.date.toString()}."),
-                    Text("Country is ${weather!.country}."),
-                    Text("Cloudiness is ${weather!.cloudiness}."),
-                    Text("Temp is ${weather!.temperature?.celsius} celsius."),
-                    Text("Pressure is ${weather!.pressure}."),
-                    Text("Overall weather: ${weather!.weatherDescription}."),
-                  ],
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16.sp, 16.sp, 16.sp, 0),
+                  child: Column(
+                    children: [
+                      // Image
+                      Image.asset('assets/images/data.png', height: 32.h),
+
+                      // Title
+                      Text(
+                        "Weather Data",
+                        style: theme.textTheme.displaySmall,
+                      ),
+                      SizedBox(height: 1.h),
+
+                      // Date snapshot
+                      Text(
+                        "Date snapshot: ${weather?.date?.toString() ?? "Unknown"}.",
+                      ),
+                      SizedBox(height: 1.h),
+
+                      // Area
+                      weatherCard(context, const Icon(Icons.map), "Area",
+                          weather?.areaName ?? "Unknown"),
+
+                      // Overall weather
+                      weatherCard(
+                          context,
+                          const Icon(Icons.note_alt),
+                          "Overall",
+                          weather?.weatherDescription?.toUpperCase() ??
+                              "Unknown"),
+
+                      // Temperature
+                      weatherCard(
+                        context,
+                        const Icon(Icons.thermostat),
+                        "Temperature",
+                        '${weather?.temperature.toString()}; ${weather?.tempMin.toString()} to ${weather?.tempMax.toString()}' ??
+                            "Unknown",
+                      ),
+
+                      // Wind speed
+                      weatherCard(
+                          context,
+                          const Icon(Icons.wind_power),
+                          "Wind Speed",
+                          '${weather?.windSpeed} m/s' ?? "Unknown"),
+
+                      // Message
+                      message != null ? Text(message!) : Container(),
+                    ],
+                  ),
                 ),
               ),
             ),
     );
   }
+}
+
+Widget weatherCard(
+    BuildContext context, Icon icon, String label, String value) {
+  return Card(
+    margin: EdgeInsets.all(8.sp),
+    child: Padding(
+      padding: EdgeInsets.all(12.sp),
+      child: Row(
+        children: [
+          icon,
+          SizedBox(width: 2.w),
+          Text(
+            "$label:",
+            style: Theme.of(context).textTheme.bodyLarge!.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          SizedBox(width: 2.w),
+          Text(value),
+        ],
+      ),
+    ),
+  );
 }
