@@ -3,8 +3,8 @@
 A simple weather app that gives a motivational message.
 
 ## Screenshots
-![](images/screenshot1.png)
+![](assets/screenshot1.png)
 
-![](images/screenshot2.png)
+![](assets/screenshot2.png)
 
-![](images/screenshot3.png)
+![](assets/screenshot3.png)
